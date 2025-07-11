@@ -1,301 +1,160 @@
-import React, { useState } from 'react';
-import * as XLSX from 'xlsx';
+import React, { useState } from "react";
+import Papa from "papaparse";
+import { saveAs } from "file-saver";
 
-function App() {
-  return <ExcelReader />;
+// === Utilities ===
+
+function FirebaseSafeKey(key) {
+  return key.replace(/\./g, "_");
 }
 
-const ExcelReader = () => {
-  const [fileData, setFileData] = useState(null);
-  const [sheetNames, setSheetNames] = useState([]);
-  const [selectedSheet, setSelectedSheet] = useState('');
-  const [sheetData, setSheetData] = useState(null);
-  const [columnNames, setColumnNames] = useState([]);
-  const [showModal, setShowModal] = useState(false);
-  const [currentGroup, setCurrentGroup] = useState(0);
-  const [customName, setCustomName] = useState('');
+function getHPFormat(str) {
+  let v = 0;
+  str = str?.toLowerCase().replace("hp", "").trim();
+  const isM = str.includes("m");
+  const isK = str.includes("k");
+  str = str.replace("m", "").replace("k", "");
 
-  const handleFileUpload = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-
-        const unmergedData = unmergeSheet(worksheet);
-        setFileData(file);
-        setSheetData(unmergedData);
-        setSheetNames(workbook.SheetNames);
-      };
-      reader.readAsArrayBuffer(file);
-    }
+  try {
+    v = parseFloat(str);
+    if (isK) v *= 1_000;
+    if (isM) v *= 1_000_000;
+  } catch {
+    v = 0;
   }
-  const ReadFile = (file, sheetName) => {
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const worksheet = workbook.Sheets[sheetName];
 
-        const unmergedData = unmergeSheet(worksheet);
-        setFileData(file);
-        setSheetData(unmergedData);
-        setSheetNames(workbook.SheetNames);
-      };
-      reader.readAsArrayBuffer(file);
-    }
-  }
-  const unmergeSheet = (worksheet) => {
-    // Parse sheet into JSON for easier manipulation
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+  return v;
+}
 
-    // Check for merged cells
-    const merges = worksheet['!merges'] || [];
-    merges.forEach((merge) => {
-      const startRow = merge.s.r; // Start row
-      const endRow = merge.e.r;   // End row
-      const startCol = merge.s.c; // Start column
-      const endCol = merge.e.c;   // End column
+function convertCSVRowToEnemyEntry(row) {
+  const key = row[0]?.trim();
+  const rate = parseFloat(row[1]);
+  if (!key || isNaN(rate)) return null;
+  return { key, rate };
+}
 
-      // Value in the top-left cell of the merge
-      const value = jsonData[startRow][startCol];
+function convertCSVRowToBossEntries(row, includeDamage = false) {
+  try {
+    // Ensure row is long enough
+    if (row.length < 11) return null;
 
-      // Apply value to all cells in the merged range
-      for (let row = startRow; row <= endRow; row++) {
-        for (let col = startCol; col <= endCol; col++) {
-          if (!jsonData[row]) jsonData[row] = [];
-          jsonData[row][col] = value;
-        }
-      }
-    });
+    row = row.map(cell => cell?.trim());
 
-    return jsonData;
-  };
-
-  const loadSheetData = (workbook, sheetName) => {
-    const sheet = workbook.Sheets[sheetName];
-    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 2 });
-    setSheetData(removeLastTwoColumns(jsonData));
-  };
-
-  const handleSheetSelect = (event) => {
-    const selectedSheetName = event.target.value;
-    ReadFile(fileData, selectedSheetName);
-    setSelectedSheet(selectedSheetName);
-  };
-
-  const removeLastTwoColumns = (data) => data.map(row => row.slice(0, -2));
-
-  const updateHeaderNames = (headers) => {
-    const updatedHeaders = [...headers];
-    return updatedHeaders;
-  };
-
-  const handleNameChange = (e) => setCustomName(e.target.value);
-
-  const handleSaveName = () => {
-    const updatedNames = [...columnNames];
-    updatedNames[currentGroup] = customName;
-    setColumnNames(updatedNames);
-    setCustomName('');
-    setCurrentGroup(currentGroup + 1);
-
-    if (currentGroup + 1 >= Math.ceil(sheetData[0].length / 6)) {
-      setShowModal(false);
-    }
-  };
-
-  const openModal = () => {
-    setShowModal(true);
-    setCurrentGroup(0);
-  };
-
-  const generateJson = () => {
-    // Filter the rows to exclude invalid waves
-    let newSheetData = sheetData.filter((item, index) => {
-      const wave = item[0];
-      // Skip rows where the wave value is invalid (null, "-", or "")
-      return wave && wave !== "-" && wave !== "" && index > 1;
-    });
-
-    let waveName = 0;
-    let finalData = {
-      "totalWave": []
+    const miniBoss = {
+      id: FirebaseSafeKey(row[2]),
+      key: row[0],
+      scale: parseFloat(row[3]),
+      hp: getHPFormat(row[5])
     };
-    newSheetData.map((row) => {
-      if (row[0] == "B") {
-        waveName += 1;
-        let newWaveData = {
-          "wave": row[0],
-          "startTime": 0,
-          "endTime": 0,
-          "totalWave": 1,
-          "totalEnemy": 1,
-          "enemylist": [{
-            quantity: 1,
-            scale: 1,
-            minDistance: 0,
-            maxDistance: 0,
-            radious: 0,
-            typeSpawn: "0",
-            totalWave: 1,
-            enemyId: ""
-          }]
-        }
-        let currentData = {
-          "wave": waveName,
-          "data": [newWaveData]
-        }
-        finalData.totalWave.push(currentData);
-        waveName += 1;
+
+    const boss = {
+      id: FirebaseSafeKey(row[7]),
+      key: row[0],
+      scale: parseFloat(row[8]),
+      hp: getHPFormat(row[10])
+    };
+
+    if (includeDamage) {
+      miniBoss.damage = getHPFormat(row[4]);
+      boss.damage = getHPFormat(row[9]);
+    }
+
+    return { miniBoss, boss };
+  } catch (err) {
+    console.error("Failed to parse row:", row, err);
+    return null;
+  }
+}
+
+export default function CreepRateExporter() {
+  const [enemyUrl, setEnemyUrl] = useState(
+    "https://docs.google.com/spreadsheets/d/1Vb0cXO0iBg3TKVSMdUko7v79VVInlkkn0_KklBeAyns/export?format=csv&gid=248018394"
+  );
+  const [bossUrl, setBossUrl] = useState(
+    "https://docs.google.com/spreadsheets/d/1Vb0cXO0iBg3TKVSMdUko7v79VVInlkkn0_KklBeAyns/export?format=csv&gid=629366882"
+  );
+  const [loading, setLoading] = useState(false);
+
+  const handleExport = async (includeDamage = false) => {
+    setLoading(true);
+
+    const enemyList = [];
+    const bossList = [];
+    const minibossList = [];
+
+    try {
+      const enemyText = await fetch(enemyUrl).then(res => res.text());
+      const enemyRows = Papa.parse(enemyText).data;
+
+      for (let i = 1; i < enemyRows.length; i++) {
+        if (enemyRows[i].filter(Boolean).length === 0) continue; // skip empty rows
+        const entry = convertCSVRowToEnemyEntry(enemyRows[i]);
+        if (entry) enemyList.push(entry);
       }
-      else {
-        let currentData = finalData.totalWave.find(a => a.wave == waveName);
-        let newWaveData = {
-          "wave": row[0],
-          "startTime": row[1],
-          "endTime": row[2],
-          "totalWave": row[3],
-          "totalEnemy": row[4],
-          "enemylist": []
-        }
-        let i = 5;
-        for (let j = 0; j < 4; j++) {
-          let enemyData = {
-            "quantity": isNaN(row[i]) ? 0 : row[i],
-            "scale": isNaN(row[i + 1]) ? 0 : row[i + 1],
-            "minDistance": isNaN(row[i + 2]) ? 0 : row[i + 2],
-            "maxDistance": isNaN(row[i + 3]) ? 0 : row[i + 3],
-            radious: isNaN(row[i + 4]) ? 0 : row[i + 4],
-            typeSpawn: row[i + 5],
-            totalWave: isNaN(row[i + 6]) ? 0 : row[i + 6],
-            enemyId: row[i + 7]
-          }
-          i += 8;
-          if (enemyData.enemyId && enemyData.enemyId.trim() != "-") {
-            newWaveData.enemylist.push(enemyData);
-          }
-        }
 
+      const bossText = await fetch(bossUrl).then(res => res.text());
+      const bossRows = Papa.parse(bossText).data;
 
-        if (!currentData) {
-          currentData = {
-            "wave": waveName,
-            "data": [newWaveData]
-          }
-          finalData.totalWave.push(currentData);
+      for (let i = 1; i < bossRows.length; i++) {
+        if (bossRows[i].filter(Boolean).length === 0) continue; // skip empty rows
+        const parsed = convertCSVRowToBossEntries(bossRows[i], includeDamage);
+        if (parsed) {
+          bossList.push(parsed.boss);
+          minibossList.push(parsed.miniBoss);
         }
-        else {
-          currentData.data = [...currentData.data, newWaveData];
-          finalData.totalWave = finalData.totalWave.map(item => {
-            if (item.wave == waveName) {
-              return currentData;
-            }
-            return item;
-          })
-        }
-
       }
-    })
-    const blob = new Blob([JSON.stringify(finalData, null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'output.json';
-    link.click();
+
+      const sheetRateList = {
+        enemyList,
+        bossList,
+        minibossList
+      };
+
+      const fileName = includeDamage ? "creep_rate_with_damage.json" : "creep_rate.json";
+      const blob = new Blob([JSON.stringify(sheetRateList, null, 2)], {
+        type: "application/json"
+      });
+      saveAs(blob, fileName);
+    } catch (err) {
+      console.error("Export failed", err);
+      alert("Something went wrong while exporting.");
+    }
+
+    setLoading(false);
   };
-
-
-
-
 
   return (
-    <div style={styles.container}>
-      <input type="file" onChange={handleFileUpload} accept=".xlsx, .xls" />
+    <div style={{ maxWidth: 600, margin: "2rem auto", fontFamily: "Arial" }}>
+      <h2>Export creep_rate.json</h2>
 
-      {sheetNames.length > 0 && (
-        <select value={selectedSheet} onChange={handleSheetSelect} style={styles.select}>
-          {sheetNames.map((name, index) => (
-            <option key={index} value={name}>{name}</option>
-          ))}
-        </select>
-      )}
+      <div style={{ marginBottom: "1rem" }}>
+        <label>Enemy CSV URL:</label><br />
+        <input
+          type="text"
+          value={enemyUrl}
+          onChange={e => setEnemyUrl(e.target.value)}
+          style={{ width: "100%", padding: "8px" }}
+        />
+      </div>
 
-      {sheetData && (
-        <>
-          <button onClick={generateJson} style={styles.button}>Generate JSON</button>
-          <table style={styles.table}>
-            <thead>
-              <tr style={styles.headerRow}>
-                {updateHeaderNames(sheetData[0]).map((header, index) => (
-                  index < sheetData[0].length && (
-                    <th key={index} style={styles.headerCell}>{header}</th>
-                  )
-                ))}
-              </tr>
-              <tr style={styles.headerRow}>
-                {updateHeaderNames(sheetData[1]).map((header, index) => (
-                  index < sheetData[1].length && (
-                    <th key={index} style={styles.headerCell}>{header}</th>
-                  )
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sheetData.map((row, index) => {
-                if (index <= 1) {
-                  return (<tr></tr>);
-                }
-                return (
-                  <tr key={index} style={index % 2 === 0 ? styles.evenRow : styles.oddRow}>
-                    {row.map((cell, i) => (
-                      <td key={i} style={styles.cell}>{cell}</td>
-                    ))}
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </>
-      )}
+      <div style={{ marginBottom: "1rem" }}>
+        <label>Boss + Miniboss CSV URL:</label><br />
+        <input
+          type="text"
+          value={bossUrl}
+          onChange={e => setBossUrl(e.target.value)}
+          style={{ width: "100%", padding: "8px" }}
+        />
+      </div>
 
-      {showModal && (
-        <div style={styles.modal}>
-          <div style={styles.modalContent}>
-            <h3>Enter a name for columns {currentGroup * 5 + 5} - {Math.min((currentGroup + 1) * 5, sheetData[0].length)}</h3>
-            <input
-              type="text"
-              value={customName}
-              onChange={handleNameChange}
-              style={styles.input}
-            />
-            <button onClick={handleSaveName} style={styles.button}>Save Name</button>
-            <button onClick={() => setShowModal(false)} style={styles.button}>Close</button>
-          </div>
-        </div>
-      )}
+      <div style={{ display: "flex", gap: "10px" }}>
+        <button onClick={() => handleExport(false)} disabled={loading} style={{ padding: "10px 20px" }}>
+          {loading ? "Exporting..." : "Old Export (no damage)"}
+        </button>
+        <button onClick={() => handleExport(true)} disabled={loading} style={{ padding: "10px 20px" }}>
+          {loading ? "Exporting..." : "New Export (with damage)"}
+        </button>
+      </div>
     </div>
   );
-};
-
-// Styling object
-const styles = {
-  container: { padding: '20px', fontFamily: 'Arial, sans-serif' },
-  select: { padding: '10px', margin: '10px 0', fontSize: '16px' },
-  table: { width: '100%', borderCollapse: 'collapse', marginTop: '20px' },
-  headerCell: { padding: '10px', border: '1px solid #ddd', textAlign: 'left', fontWeight: 'bold' },
-  evenRow: { backgroundColor: '#f2f2f2' },
-  oddRow: { backgroundColor: '#ffffff' },
-  cell: { padding: '10px', border: '1px solid #ddd', textAlign: 'left' },
-  button: { padding: '10px 20px', backgroundColor: '#4CAF50', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', marginTop: '20px', marginRight: '10px' },
-  modal: { position: 'fixed', top: '0', left: '0', width: '100%', height: '100%', backgroundColor: 'rgba(0, 0, 0, 0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { backgroundColor: 'white', padding: '20px', borderRadius: '4px', width: '300px', textAlign: 'center' },
-  input: { width: '100%', padding: '10px', marginBottom: '10px', border: '1px solid #ccc', borderRadius: '4px' },
-  headerRow: { backgroundColor: '#4CAF50', color: 'white' },
-};
-
-export default App;
+}
