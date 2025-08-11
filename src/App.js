@@ -74,20 +74,30 @@ export default function CreepRateExporter() {
     "https://docs.google.com/spreadsheets/d/1Vb0cXO0iBg3TKVSMdUko7v79VVInlkkn0_KklBeAyns/export?format=csv&gid=629366882"
   );
   const [enemyIOSUrl, setEnemyIOSUrl] = useState(
-    "https://docs.google.com/spreadsheets/d/1Vb0cXO0iBg3TKVSMdUko7v79VVInlkkn0_KklBeAyns/export?gid=1517702799#gid=1517702799"
+    "https://docs.google.com/spreadsheets/d/1Vb0cXO0iBg3TKVSMdUko7v79VVInlkkn0_KklBeAyns/export?format=csv&gid=1517702799"
   );
   const [bossIOSUrl, setBossIOSUrl] = useState(
-    "https://docs.google.com/spreadsheets/d/1Vb0cXO0iBg3TKVSMdUko7v79VVInlkkn0_KklBeAyns/export?gid=1951691228#gid=1951691228"
+    "https://docs.google.com/spreadsheets/d/1Vb0cXO0iBg3TKVSMdUko7v79VVInlkkn0_KklBeAyns/export?format=csv&gid=1951691228"
   );
   const [loading, setLoading] = useState(false);
 
   const handleExport = async (includeDamage = false) => {
     setLoading(true);
-    handleExportPlatform(enemyAndroidUrl,bossAndroidUrl,`rate_android`, includeDamage);
-    handleExportPlatform(enemyIOSUrl,bossIOSUrl,`rate_ios`, includeDamage);
+    handleExportPlatform(
+      enemyAndroidUrl,
+      bossAndroidUrl,
+      `rate_android`,
+      includeDamage
+    );
+    handleExportPlatform(enemyIOSUrl, bossIOSUrl, `rate_ios`, includeDamage);
     setLoading(false);
   };
-  const handleExportPlatform = async (enemyUrl,bossUrl,fileName, includeDamage = false) => {
+  const handleExportPlatform = async (
+    enemyUrl,
+    bossUrl,
+    fileName,
+    includeDamage = false
+  ) => {
     const enemyList = [];
     const bossList = [];
     const minibossList = [];
